@@ -2,8 +2,7 @@ import os
 from typing import Any, Optional
 
 import pandas as pd
-from fastapi import FastAPI, File, Form, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import APIRouter, File, Form, UploadFile
 from pydantic import BaseModel, Field
 
 # Load environment variables from .env file
@@ -15,15 +14,7 @@ from .dataset_generator import generate_demo_dataset, load_or_generate_demo_data
 from .tools import generate_structured_ai_response
 
 
-app = FastAPI(title="AI Business Intelligence Agent")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+router = APIRouter()
 
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
@@ -169,7 +160,7 @@ def _run_full_analysis(df: pd.DataFrame, user_question: Optional[str] = "") -> A
     )
 
 
-@app.post("/analyze", response_model=AnalysisResponse)
+@router.post("/analyze", response_model=AnalysisResponse)
 async def analyze(
     use_demo: bool = Form(default=True),
     demo_dataset_name: Optional[str] = Form(default=None),
@@ -193,7 +184,7 @@ async def analyze(
     return _run_full_analysis(df, user_question=question or "")
 
 
-@app.post("/compare", response_model=ComparisonResponse)
+@router.post("/compare", response_model=ComparisonResponse)
 async def compare(
     primary_use_demo: bool = Form(default=True),
     primary_demo_dataset_name: Optional[str] = Form(default=None),
@@ -241,12 +232,6 @@ async def compare(
     )
 
 
-@app.get("/health")
+@router.get("/health")
 async def health():
     return {"status": "ok"}
-
-
-if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run("backend.agent:app", host="0.0.0.0", port=8000, reload=True)
