@@ -6,8 +6,6 @@ import numpy as np
 import json
 
 import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_groq import ChatGroq
 
@@ -136,13 +134,14 @@ def generate_dynamic_chart(df: pd.DataFrame, question: str, chart_type: Optional
     """
     Generate a Plotly chart dynamically by creating exact px code via an LLM.
     """
+    import plotly.express as px  # lazy import — only loaded when charts are requested
     try:
         code = generate_plotly_query(df, question)
         if not code:
             return None
-            
+
         logger.info(f"Generated Plotly code: {code}")
-        
+
         namespace = {"df": df, "px": px, "pd": pd, "np": np}
         fig = eval(code, {"__builtins__": {}}, namespace)
         
@@ -918,6 +917,8 @@ def _generate_full_report(dataset_summary: str, stats_snapshot: Dict[str, Any]) 
 
 def run_advanced_analytics(df: pd.DataFrame, intent: str, question: str) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
     """Execute specialized quantitative analysis matching requested advanced intents."""
+    import plotly.express as px  # lazy import — only loaded when advanced analytics are requested
+    import plotly.graph_objects as go  # lazy import
     if df is None or len(df) == 0:
         return "Not enough data for advanced analytics.", None
 
