@@ -4,6 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
 
+from .config import get_settings
 from .schemas import (
     AlternativesResponse,
     EntityType,
@@ -17,13 +18,22 @@ from .services.medicine_service import MedicineService
 
 router = APIRouter()
 
+# Initialize services at module level so they work when mounted as a sub-app
+# (sub-app lifespan events don't fire reliably when using app.mount())
+_settings = get_settings()
+_medicine_service = MedicineService(_settings.dataset_path)
+_intent_service = IntentService(
+    api_key=_settings.groq_api_key,
+    model=_settings.groq_model,
+)
+
 
 def get_intent_service(request: Request) -> IntentService:
-    return request.app.state.intent_service
+    return _intent_service
 
 
 def get_medicine_service(request: Request) -> MedicineService:
-    return request.app.state.medicine_service
+    return _medicine_service
 
 
 @router.get("/health")
