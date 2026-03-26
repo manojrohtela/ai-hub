@@ -18,28 +18,21 @@ from .services.medicine_service import MedicineService
 
 router = APIRouter()
 
-# Services are initialized lazily on first request to avoid loading
-# the 45MB CSV dataset at startup (would exceed Render's 512MB RAM limit).
-_medicine_service: MedicineService | None = None
-_intent_service: IntentService | None = None
+# Eager init at module level — safe now that MedicineService stores normalized
+# values as compact lists (~170MB) instead of dict fields (~400MB).
+_settings = get_settings()
+_medicine_service = MedicineService(_settings.dataset_path)
+_intent_service = IntentService(
+    api_key=_settings.groq_api_key,
+    model=_settings.groq_model,
+)
 
 
 def get_medicine_service(request: Request) -> MedicineService:
-    global _medicine_service
-    if _medicine_service is None:
-        settings = get_settings()
-        _medicine_service = MedicineService(settings.dataset_path)
     return _medicine_service
 
 
 def get_intent_service(request: Request) -> IntentService:
-    global _intent_service
-    if _intent_service is None:
-        settings = get_settings()
-        _intent_service = IntentService(
-            api_key=settings.groq_api_key,
-            model=settings.groq_model,
-        )
     return _intent_service
 
 
