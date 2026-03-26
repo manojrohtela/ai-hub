@@ -18,9 +18,8 @@ from .services.medicine_service import MedicineService
 
 router = APIRouter()
 
-# Lazy init — MedicineService loads a 65MB pickle cache on first request
-# (~0.3s) instead of parsing the raw CSV (~8s). This keeps startup memory
-# within Render's 512MB limit while making chat responses fast.
+# Lazy init — MedicineService builds a compact SQLite cache on first request
+# and then streams matches from disk instead of keeping the full CSV in RAM.
 _medicine_service: MedicineService | None = None
 _intent_service: IntentService | None = None
 
@@ -57,8 +56,9 @@ async def extract_intent(
 ) -> IntentResponse:
     return await intent_service.extract_intent(
         text=payload.text,
-        known_medicines=medicine_service.known_medicine_names,
-        known_salt_keys=medicine_service.known_salt_keys,
+        known_medicines=medicine_service.get_prompt_medicine_names(),
+        known_salt_keys=medicine_service.get_prompt_salt_keys(),
+        medicine_lookup=medicine_service.find_medicine_mention,
     )
 
 

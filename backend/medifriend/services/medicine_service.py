@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import csv
+import heapq
+import os
 import re
+import sqlite3
+from contextlib import contextmanager
+from itertools import count
 from pathlib import Path
-
-import pandas as pd
+from typing import Iterator, Mapping, Sequence
 
 from ..schemas import AlternativesResponse, MedicineRecord, SearchResponse
 
@@ -63,181 +68,377 @@ class MedicineService:
     }
     COMPOSITION_COLUMNS = ["composition", "short_composition1", "short_composition2", "primary_salt"]
     DISCONTINUED_COLUMNS = ["Is_discontinued", "is_discontinued"]
+    READ_BATCH_SIZE = 2_000
 
     def __init__(self, csv_path: Path) -> None:
         if not csv_path.exists():
             raise FileNotFoundError(f"Medicine dataset not found at {csv_path}")
 
-        cache_path = csv_path.with_suffix(".pkl")
-        if cache_path.exists():
-            import pickle
-            with open(cache_path, "rb") as fh:
-                data = pickle.load(fh)
-            self._records: list[dict[str, object]] = data["records"]
-            self._norms: dict[str, list[str]] = data["norms"]
-        else:
-            frame = self._load_frame(csv_path)
-            for column in self.REQUIRED_COLUMNS:
-                frame[column] = frame[column].astype(str).str.strip()
+        self._csv_path = csv_path
+        self._db_path = csv_path.with_suffix(".sqlite3")
+        self._ensure_database()
 
-            frame["uses_list"] = frame["uses"].map(split_uses)
+    @property
+    def known_medicine_names(self) -> list[str]:
+        return self.get_prompt_medicine_names()
 
-            self._norms = {
-                col: frame[col].map(normalize_text).tolist()
-                for col in self.REQUIRED_COLUMNS
+    @property
+    def known_salt_keys(self) -> list[str]:
+        return self.get_prompt_salt_keys()
+
+    def _ensure_database(self) -> None:
+        csv_mtime = self._csv_path.stat().st_mtime
+        db_exists = self._db_path.exists()
+        db_is_fresh = db_exists and self._db_path.stat().st_mtime >= csv_mtime
+
+        if db_is_fresh:
+            return
+
+        build_path = self._db_path.with_suffix(self._db_path.suffix + ".building")
+        if build_path.exists():
+            build_path.unlink()
+
+        self._build_database(self._csv_path, build_path)
+        os.replace(build_path, self._db_path)
+
+    def _build_database(self, csv_path: Path, db_path: Path) -> None:
+        with csv_path.open("r", newline="", encoding="utf-8", errors="replace") as csv_file:
+            reader = csv.DictReader(csv_file)
+            if not reader.fieldnames:
+                raise ValueError(f"Medicine dataset at {csv_path} has no header row")
+
+            available_columns = set(reader.fieldnames)
+            requested_columns = {
+                column
+                for canonical_columns in self.COLUMN_ALIASES.values()
+                for column in canonical_columns
+                if column in available_columns
             }
+            requested_columns.update(
+                column for column in self.COMPOSITION_COLUMNS if column in available_columns
+            )
+            requested_columns.update(
+                column for column in self.DISCONTINUED_COLUMNS if column in available_columns
+            )
 
-            _resp_cols = ["name", "composition", "category", "uses", "salt_key", "manufacturer", "uses_list"]
-            self._records = frame[_resp_cols].to_dict("records")
-            del frame
+            with sqlite3.connect(str(db_path)) as conn:
+                conn.execute("PRAGMA journal_mode = OFF")
+                conn.execute("PRAGMA synchronous = OFF")
+                conn.execute("PRAGMA temp_store = MEMORY")
+                conn.execute(
+                    """
+                    CREATE TABLE medicines (
+                        name TEXT NOT NULL,
+                        composition TEXT NOT NULL,
+                        category TEXT NOT NULL,
+                        uses TEXT NOT NULL,
+                        salt_key TEXT NOT NULL,
+                        manufacturer TEXT NOT NULL,
+                        normalized_name TEXT NOT NULL,
+                        normalized_composition TEXT NOT NULL,
+                        normalized_category TEXT NOT NULL,
+                        normalized_uses TEXT NOT NULL,
+                        normalized_salt_key TEXT NOT NULL,
+                        normalized_manufacturer TEXT NOT NULL
+                    )
+                    """
+                )
 
-        name_pairs = {
-            (str(record["name"]), self._norms["name"][i])
-            for i, record in enumerate(self._records)
-            if record["name"]
-        }
-        salt_pairs = {
-            (str(record["salt_key"]), self._norms["salt_key"][i])
-            for i, record in enumerate(self._records)
-            if record["salt_key"]
-        }
-        self.known_medicine_names = [
-            name for name, _ in sorted(name_pairs, key=lambda item: len(item[1]), reverse=True)
-        ]
-        self.known_salt_keys = [
-            salt for salt, _ in sorted(salt_pairs, key=lambda item: len(item[1]), reverse=True)
-        ]
+                insert_sql = (
+                    "INSERT INTO medicines ("
+                    "name, composition, category, uses, salt_key, manufacturer, "
+                    "normalized_name, normalized_composition, normalized_category, "
+                    "normalized_uses, normalized_salt_key, normalized_manufacturer"
+                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                )
 
-    def _load_frame(self, csv_path: Path) -> pd.DataFrame:
-        header = pd.read_csv(csv_path, nrows=0)
-        available_columns = set(header.columns)
-        requested_columns = {
-            column
-            for canonical_columns in self.COLUMN_ALIASES.values()
-            for column in canonical_columns
-            if column in available_columns
-        }
-        requested_columns.update(
-            column for column in self.COMPOSITION_COLUMNS if column in available_columns
-        )
-        requested_columns.update(
-            column for column in self.DISCONTINUED_COLUMNS if column in available_columns
-        )
+                batch: list[tuple[str, ...]] = []
+                for row in reader:
+                    standardized = self._standardize_row(row, requested_columns)
+                    if standardized is None:
+                        continue
 
-        frame = pd.read_csv(
-            csv_path,
-            usecols=sorted(requested_columns) if requested_columns else None,
-            dtype=str,
-        ).fillna("")
+                    batch.append(
+                        (
+                            standardized["name"],
+                            standardized["composition"],
+                            standardized["category"],
+                            standardized["uses"],
+                            standardized["salt_key"],
+                            standardized["manufacturer"],
+                            normalize_text(standardized["name"]),
+                            normalize_text(standardized["composition"]),
+                            normalize_text(standardized["category"]),
+                            normalize_text(standardized["uses"]),
+                            normalize_text(standardized["salt_key"]),
+                            normalize_text(standardized["manufacturer"]),
+                        )
+                    )
 
-        standardized = pd.DataFrame(index=frame.index)
-        standardized["name"] = self._pick_first_non_empty(frame, self.COLUMN_ALIASES["name"])
-        standardized["manufacturer"] = self._pick_first_non_empty(
-            frame,
+                    if len(batch) >= self.READ_BATCH_SIZE:
+                        conn.executemany(insert_sql, batch)
+                        batch.clear()
+
+                if batch:
+                    conn.executemany(insert_sql, batch)
+
+                conn.execute("CREATE INDEX idx_medicines_name ON medicines(normalized_name)")
+                conn.execute("CREATE INDEX idx_medicines_salt_key ON medicines(normalized_salt_key)")
+                conn.execute("CREATE INDEX idx_medicines_category ON medicines(normalized_category)")
+                conn.execute("CREATE INDEX idx_medicines_uses ON medicines(normalized_uses)")
+                conn.execute("CREATE INDEX idx_medicines_composition ON medicines(normalized_composition)")
+                conn.execute("CREATE INDEX idx_medicines_manufacturer ON medicines(normalized_manufacturer)")
+                conn.commit()
+
+    def _standardize_row(
+        self,
+        row: Mapping[str, str],
+        requested_columns: set[str],
+    ) -> dict[str, str] | None:
+        normalized_row = {column: self._clean_value(row.get(column, "")) for column in requested_columns}
+
+        name = self._pick_first_non_empty_from_row(normalized_row, self.COLUMN_ALIASES["name"])
+        manufacturer = self._pick_first_non_empty_from_row(
+            normalized_row,
             self.COLUMN_ALIASES["manufacturer"],
         )
-        standardized["category"] = self._pick_first_non_empty(
-            frame,
-            self.COLUMN_ALIASES["category"],
+        category = self._pick_first_non_empty_from_row(normalized_row, self.COLUMN_ALIASES["category"])
+        uses = self._pick_first_non_empty_from_row(normalized_row, self.COLUMN_ALIASES["uses"])
+        salt_key = self._clean_salt_key(
+            self._pick_first_non_empty_from_row(normalized_row, self.COLUMN_ALIASES["salt_key"])
         )
-        standardized["uses"] = self._pick_first_non_empty(frame, self.COLUMN_ALIASES["uses"])
-        standardized["salt_key"] = self._clean_salt_key(
-            self._pick_first_non_empty(frame, self.COLUMN_ALIASES["salt_key"])
-        )
-        standardized["composition"] = self._build_composition(frame)
+        composition = self._build_composition_from_row(normalized_row)
 
-        missing_columns = [
-            column
-            for column in self.REQUIRED_COLUMNS
-            if column not in standardized.columns or not standardized[column].astype(str).str.strip().any()
-        ]
-        if missing_columns:
-            raise ValueError(
-                "Dataset is missing required columns or values for: "
-                + ", ".join(sorted(missing_columns))
-            )
+        if not name or not salt_key:
+            return None
 
-        standardized = standardized[standardized["name"].astype(str).str.strip() != ""].copy()
-        standardized = standardized[standardized["salt_key"].astype(str).str.strip() != ""].copy()
+        discontinued_value = next(
+            (
+                normalized_row[column]
+                for column in self.DISCONTINUED_COLUMNS
+                if column in normalized_row and normalized_row[column]
+            ),
+            "",
+        ).lower()
+        if discontinued_value in {"true", "1", "yes"}:
+            return None
 
-        discontinued_column = next(
-            (column for column in self.DISCONTINUED_COLUMNS if column in frame.columns),
-            None,
-        )
-        if discontinued_column:
-            discontinued_values = (
-                frame[discontinued_column].astype(str).str.strip().str.lower()
-            )
-            keep_mask = ~discontinued_values.isin({"true", "1", "yes"})
-            standardized = standardized.loc[keep_mask].copy()
+        return {
+            "name": name,
+            "composition": composition,
+            "category": category,
+            "uses": uses,
+            "salt_key": salt_key,
+            "manufacturer": manufacturer,
+        }
 
-        standardized = standardized.drop_duplicates(
-            subset=["name", "manufacturer", "salt_key"],
-            keep="first",
-        )
-        return standardized.reset_index(drop=True)
-
-    def _pick_first_non_empty(
+    def _pick_first_non_empty_from_row(
         self,
-        frame: pd.DataFrame,
+        row: Mapping[str, str],
         candidate_columns: list[str],
-    ) -> pd.Series:
-        result = pd.Series("", index=frame.index, dtype="string")
+    ) -> str:
         for column in candidate_columns:
-            if column not in frame.columns:
-                continue
-            candidate = self._clean_series(frame[column])
-            result = result.mask(result.eq(""), candidate)
-        return result.fillna("")
+            value = self._clean_value(row.get(column, ""))
+            if value:
+                return value
+        return ""
 
-    def _build_composition(self, frame: pd.DataFrame) -> pd.Series:
-        if "composition" in frame.columns:
-            direct = self._clean_series(frame["composition"])
-            if direct.str.strip().any():
-                return direct
+    def _build_composition_from_row(self, row: Mapping[str, str]) -> str:
+        direct = self._clean_value(row.get("composition", ""))
+        if direct:
+            return direct
 
         parts = [
-            self._clean_series(frame[column])
+            self._clean_value(row.get(column, ""))
             for column in self.COMPOSITION_COLUMNS
-            if column in frame.columns and column != "composition"
+            if column in row and column != "composition"
         ]
+        parts = [part for part in parts if part]
         if not parts:
-            return pd.Series("", index=frame.index, dtype="string")
+            return ""
+        return " + ".join(parts)
 
-        composition = parts[0]
-        for part in parts[1:]:
-            composition = composition.where(
-                part.eq(""),
-                composition.where(composition.eq(""), composition + " + ") + part,
+    def _clean_value(self, value: object) -> str:
+        text = str(value or "")
+        text = text.replace("\x00", " ").strip()
+        if text.lower() in {"nan", "none", "null"}:
+            return ""
+        return text
+
+    def _clean_salt_key(self, value: str) -> str:
+        cleaned = (
+            self._clean_value(value)
+            .replace("+nan", "")
+            .replace("nan+", "")
+            .replace("_nan", "")
+        )
+        cleaned = re.sub(r"\++", "+", cleaned)
+        return cleaned.strip("+_ ")
+
+    @contextmanager
+    def _open_connection(self) -> Iterator[sqlite3.Connection]:
+        conn = sqlite3.connect(f"file:{self._db_path}?mode=ro", uri=True)
+        conn.row_factory = sqlite3.Row
+        try:
+            conn.execute("PRAGMA query_only = ON")
+            yield conn
+        finally:
+            conn.close()
+
+    def _fetch_rows(
+        self,
+        conn: sqlite3.Connection,
+        columns: Sequence[str],
+        where_clause: str = "",
+        params: Sequence[object] = (),
+    ) -> Iterator[dict[str, str]]:
+        sql = f"SELECT {', '.join(columns)} FROM medicines"
+        if where_clause:
+            sql = f"{sql} WHERE {where_clause}"
+
+        cursor = conn.execute(sql, params)
+        while True:
+            rows = cursor.fetchmany(self.READ_BATCH_SIZE)
+            if not rows:
+                break
+            for row in rows:
+                yield dict(row)
+
+    def _fetch_one(
+        self,
+        conn: sqlite3.Connection,
+        columns: Sequence[str],
+        where_clause: str,
+        params: Sequence[object],
+    ) -> dict[str, str] | None:
+        sql = f"SELECT {', '.join(columns)} FROM medicines WHERE {where_clause} LIMIT 1"
+        row = conn.execute(sql, params).fetchone()
+        return dict(row) if row is not None else None
+
+    def _push_candidate(
+        self,
+        heap: list[tuple[float, int, dict[str, object]]],
+        candidate: dict[str, object],
+        max_size: int,
+        seq: count,
+    ) -> None:
+        score = float(candidate["score"])
+        entry = (score, next(seq), candidate)
+        if len(heap) < max_size:
+            heapq.heappush(heap, entry)
+            return
+
+        if score > heap[0][0]:
+            heapq.heapreplace(heap, entry)
+
+    def _finalize_candidates(self, heap: list[tuple[float, int, dict[str, object]]]) -> list[dict[str, object]]:
+        candidates = [entry[2] for entry in heap]
+        candidates.sort(
+            key=lambda item: (
+                -float(item["score"]),
+                str(item["record"]["name"]).lower(),
             )
-        return composition.fillna("")
+        )
+        return candidates
 
-    def _clean_series(self, series: pd.Series) -> pd.Series:
-        return (
-            series.fillna("")
-            .astype(str)
-            .str.replace(r"(?i)^nan$", "", regex=True)
-            .str.replace(r"(?i)^none$", "", regex=True)
-            .str.strip()
+    def _row_to_response_record(
+        self,
+        record: Mapping[str, object],
+        score: float | int | None = None,
+        match_tags: list[str] | None = None,
+        match_reason: str | None = None,
+    ) -> MedicineRecord:
+        normalized_score = round(float(score), 2) if score is not None else None
+        uses_value = str(record.get("uses", ""))
+        return MedicineRecord(
+            name=str(record.get("name", "")),
+            composition=str(record.get("composition", "")),
+            category=str(record.get("category", "")),
+            uses=split_uses(uses_value),
+            salt_key=str(record.get("salt_key", "")),
+            manufacturer=str(record.get("manufacturer", "")),
+            match_reason=match_reason,
+            match_tags=match_tags or [],
+            score=normalized_score,
         )
 
-    def _clean_salt_key(self, series: pd.Series) -> pd.Series:
-        return (
-            self._clean_series(series)
-            .str.replace(r"(?i)\+nan\b", "", regex=True)
-            .str.replace(r"(?i)\bnan\+", "", regex=True)
-            .str.replace(r"(?i)_nan\b", "", regex=True)
-            .str.replace(r"\++", "+", regex=True)
-            .str.strip("+_ ")
-        )
+    def get_prompt_medicine_names(self, limit: int = 25) -> list[str]:
+        with self._open_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT name
+                FROM medicines
+                WHERE name <> ''
+                ORDER BY LENGTH(normalized_name) DESC, name
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+            return [str(row["name"]) for row in rows]
+
+    def get_prompt_salt_keys(self, limit: int = 20) -> list[str]:
+        with self._open_connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT salt_key
+                FROM medicines
+                WHERE salt_key <> ''
+                ORDER BY LENGTH(normalized_salt_key) DESC, salt_key
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+            return [str(row["salt_key"]) for row in rows]
 
     def find_medicine_mention(self, text: str) -> str | None:
         normalized_text = normalize_text(text)
-        candidates = self.known_medicine_names + self.known_salt_keys
-        for candidate in candidates:
-            normalized_candidate = normalize_text(candidate)
-            if normalized_candidate and normalized_candidate in normalized_text:
-                return candidate
+        if not normalized_text:
+            return None
+
+        tokens = normalized_text.split()
+        phrases = self._build_candidate_phrases(tokens)
+        if not phrases:
+            return None
+
+        with self._open_connection() as conn:
+            for phrase in phrases:
+                wildcard = f"%{phrase}%"
+                exact_match = self._fetch_one(
+                    conn,
+                    ["name"],
+                    "normalized_name = ? OR normalized_salt_key = ?",
+                    (phrase, phrase),
+                )
+                if exact_match:
+                    return str(exact_match["name"])
+
+                exact_composition_match = self._fetch_one(
+                    conn,
+                    ["composition"],
+                    "normalized_composition = ?",
+                    (phrase,),
+                )
+                if exact_composition_match:
+                    return phrase
+
+                composition_match = self._fetch_one(
+                    conn,
+                    ["composition"],
+                    "normalized_composition LIKE ?",
+                    (wildcard,),
+                )
+                if composition_match:
+                    return phrase
+
+                fuzzy_name_match = self._fetch_one(
+                    conn,
+                    ["name"],
+                    "normalized_name LIKE ? OR normalized_salt_key LIKE ?",
+                    (wildcard, wildcard),
+                )
+                if fuzzy_name_match:
+                    return str(fuzzy_name_match["name"])
+
         return None
 
     def search(
@@ -291,7 +492,7 @@ class MedicineService:
                 follow_up_questions=[],
             )
 
-        initial_candidates = self._score_medicine_matches(normalized_query)
+        initial_candidates = self._score_medicine_matches(normalized_query, limit=limit)
         if not initial_candidates:
             return SearchResponse(
                 query=query,
@@ -317,7 +518,7 @@ class MedicineService:
         )
 
         medicines = [
-            self._to_response_record(
+            self._row_to_response_record(
                 record=candidate["record"],
                 score=candidate["score"],
                 match_tags=candidate["match_tags"],
@@ -372,68 +573,79 @@ class MedicineService:
             )
 
         symptom_keywords = self._expand_symptom_keywords(normalized_query)
-        candidates: list[dict[str, object]] = []
+        candidates: list[tuple[float, int, dict[str, object]]] = []
+        candidate_limit = max(limit * 8, 50)
+        seq = count()
 
-        _norm_uses = self._norms["uses"]
-        _norm_cats = self._norms["category"]
-        _norm_names = self._norms["name"]
+        with self._open_connection() as conn:
+            for record in self._fetch_rows(
+                conn,
+                [
+                    "name",
+                    "composition",
+                    "category",
+                    "uses",
+                    "salt_key",
+                    "manufacturer",
+                    "normalized_name",
+                    "normalized_composition",
+                    "normalized_category",
+                    "normalized_uses",
+                    "normalized_salt_key",
+                    "normalized_manufacturer",
+                ],
+            ):
+                normalized_uses = record["normalized_uses"]
+                normalized_category = record["normalized_category"]
+                normalized_name = record["normalized_name"]
 
-        for i, record in enumerate(self._records):
-            normalized_uses = _norm_uses[i]
-            normalized_category = _norm_cats[i]
-            normalized_name = _norm_names[i]
+                score = 0.0
+                match_tags: set[str] = set()
+                reasons: list[str] = []
 
-            score = 0.0
-            match_tags: set[str] = set()
-            reasons: list[str] = []
-
-            if normalized_query in normalized_uses:
-                score += 70
-                match_tags.add("uses_match")
-                reasons.append("Matched the symptom in medicine uses")
-            if normalized_query in normalized_category:
-                score += 60
-                match_tags.add("category_match")
-                reasons.append("Matched the symptom in medicine category")
-
-            for keyword in symptom_keywords:
-                if keyword and keyword in normalized_category:
-                    score += 24
-                    match_tags.add("category_match")
-                if keyword and keyword in normalized_uses:
-                    score += 18
+                if normalized_query in normalized_uses:
+                    score += 70
                     match_tags.add("uses_match")
-                if keyword and keyword in normalized_name:
-                    score += 10
+                    reasons.append("Matched the symptom in medicine uses")
+                if normalized_query in normalized_category:
+                    score += 60
+                    match_tags.add("category_match")
+                    reasons.append("Matched the symptom in medicine category")
 
-            if score <= 0:
-                continue
+                for keyword in symptom_keywords:
+                    if keyword and keyword in normalized_category:
+                        score += 24
+                        match_tags.add("category_match")
+                    if keyword and keyword in normalized_uses:
+                        score += 18
+                        match_tags.add("uses_match")
+                    if keyword and keyword in normalized_name:
+                        score += 10
 
-            candidates.append(
-                {
-                    "record": record,
-                    "score": score,
-                    "match_tags": sorted(match_tags),
-                    "match_reason": reasons[0] if reasons else "Matched symptom keywords in the dataset",
-                }
-            )
+                if score <= 0:
+                    continue
 
-        candidates.sort(
-            key=lambda item: (
-                -float(item["score"]),
-                str(item["record"]["name"]).lower(),
-            )
-        )
-        candidates = candidates[:limit]
+                self._push_candidate(
+                    candidates,
+                    {
+                        "record": record,
+                        "score": score,
+                        "match_tags": sorted(match_tags),
+                        "match_reason": reasons[0] if reasons else "Matched symptom keywords in the dataset",
+                    },
+                    candidate_limit,
+                    seq,
+                )
 
+        ranked_candidates = self._finalize_candidates(candidates)
         medicines = [
-            self._to_response_record(
+            self._row_to_response_record(
                 record=candidate["record"],
                 score=candidate["score"],
                 match_tags=candidate["match_tags"],
                 match_reason=candidate["match_reason"],
             )
-            for candidate in candidates
+            for candidate in ranked_candidates[:limit]
         ]
         primary_result = medicines[0] if medicines else None
         categories = unique_in_order([medicine.category for medicine in medicines if medicine.category])
@@ -478,25 +690,32 @@ class MedicineService:
         normalized_salt_key = normalize_text(salt_key)
         normalized_exclude_name = normalize_text(exclude_name or "")
 
-        _norm_salts = self._norms["salt_key"]
-        _norm_names = self._norms["name"]
-        matches = []
-        for i, record in enumerate(self._records):
-            if _norm_salts[i] != normalized_salt_key:
-                continue
-            if normalized_exclude_name and _norm_names[i] == normalized_exclude_name:
-                continue
-            matches.append(record)
+        with self._open_connection() as conn:
+            params: list[object] = [normalized_salt_key]
+            where_clause = "normalized_salt_key = ?"
+            if normalized_exclude_name:
+                where_clause += " AND normalized_name != ?"
+                params.append(normalized_exclude_name)
 
-        matches.sort(key=lambda record: str(record["name"]).lower())
+            rows = conn.execute(
+                f"""
+                SELECT name, composition, category, uses, salt_key, manufacturer
+                FROM medicines
+                WHERE {where_clause}
+                ORDER BY name
+                LIMIT ?
+                """,
+                (*params, limit),
+            ).fetchall()
+
         medicines = [
-            self._to_response_record(
-                record=record,
+            self._row_to_response_record(
+                record=dict(row),
                 score=90.0,
                 match_tags=["same_salt"],
                 match_reason="Shares the same salt key",
             )
-            for record in matches[:limit]
+            for row in rows
         ]
         return AlternativesResponse(
             salt_key=salt_key,
@@ -504,82 +723,93 @@ class MedicineService:
             medicines=medicines,
         )
 
-    def _score_medicine_matches(self, normalized_query: str) -> list[dict[str, object]]:
+    def _score_medicine_matches(self, normalized_query: str, limit: int = 12) -> list[dict[str, object]]:
         query_tokens = set(normalized_query.split())
-        candidates: list[dict[str, object]] = []
+        candidates: list[tuple[float, int, dict[str, object]]] = []
+        candidate_limit = max(limit * 8, 50)
+        seq = count()
 
-        _norm_names = self._norms["name"]
-        _norm_salts = self._norms["salt_key"]
-        _norm_comps = self._norms["composition"]
-        _norm_manuf = self._norms["manufacturer"]
+        with self._open_connection() as conn:
+            for record in self._fetch_rows(
+                conn,
+                [
+                    "name",
+                    "composition",
+                    "category",
+                    "uses",
+                    "salt_key",
+                    "manufacturer",
+                    "normalized_name",
+                    "normalized_composition",
+                    "normalized_category",
+                    "normalized_uses",
+                    "normalized_salt_key",
+                    "normalized_manufacturer",
+                ],
+            ):
+                normalized_name = record["normalized_name"]
+                normalized_salt_key = record["normalized_salt_key"]
+                normalized_composition = record["normalized_composition"]
+                normalized_manufacturer = record["normalized_manufacturer"]
 
-        for i, record in enumerate(self._records):
-            normalized_name = _norm_names[i]
-            normalized_salt_key = _norm_salts[i]
-            normalized_composition = _norm_comps[i]
-            normalized_manufacturer = _norm_manuf[i]
+                score = 0.0
+                match_tags: set[str] = set()
+                reasons: list[str] = []
 
-            score = 0.0
-            match_tags: set[str] = set()
-            reasons: list[str] = []
+                if normalized_name == normalized_query:
+                    score += 125
+                    match_tags.add("exact_match")
+                    reasons.append("Exact medicine name match")
+                elif normalized_query in normalized_name:
+                    score += 82
+                    match_tags.add("name_match")
+                    reasons.append("Matched medicine name")
 
-            if normalized_name == normalized_query:
-                score += 125
-                match_tags.add("exact_match")
-                reasons.append("Exact medicine name match")
-            elif normalized_query in normalized_name:
-                score += 82
-                match_tags.add("name_match")
-                reasons.append("Matched medicine name")
+                if normalized_salt_key == normalized_query:
+                    score += 110
+                    match_tags.add("same_salt")
+                    reasons.append("Matched salt key")
+                elif normalized_query in normalized_salt_key:
+                    score += 70
+                    match_tags.add("same_salt")
 
-            if normalized_salt_key == normalized_query:
-                score += 110
-                match_tags.add("same_salt")
-                reasons.append("Matched salt key")
-            elif normalized_query in normalized_salt_key:
-                score += 70
-                match_tags.add("same_salt")
+                if normalized_composition == normalized_query:
+                    score += 95
+                    match_tags.add("composition_match")
+                    reasons.append("Matched composition")
+                elif normalized_query in normalized_composition:
+                    score += 58
+                    match_tags.add("composition_match")
 
-            if normalized_composition == normalized_query:
-                score += 95
-                match_tags.add("composition_match")
-                reasons.append("Matched composition")
-            elif normalized_query in normalized_composition:
-                score += 58
-                match_tags.add("composition_match")
+                if normalized_query in normalized_manufacturer:
+                    score += 25
+                    match_tags.add("manufacturer_match")
 
-            if normalized_query in normalized_manufacturer:
-                score += 25
-                match_tags.add("manufacturer_match")
+                token_overlap = len(query_tokens.intersection(set(normalized_name.split())))
+                if token_overlap:
+                    score += token_overlap * 14
+                    match_tags.add("name_match")
 
-            token_overlap = len(query_tokens.intersection(set(normalized_name.split())))
-            if token_overlap:
-                score += token_overlap * 14
-                match_tags.add("name_match")
+                if score <= 0:
+                    continue
 
-            if score <= 0:
-                continue
+                self._push_candidate(
+                    candidates,
+                    {
+                        "record": record,
+                        "score": score,
+                        "match_tags": sorted(match_tags),
+                        "match_reason": reasons[0] if reasons else "Matched medicine query in the dataset",
+                    },
+                    candidate_limit,
+                    seq,
+                )
 
-            candidates.append(
-                {
-                    "record": record,
-                    "score": score,
-                    "match_tags": sorted(match_tags),
-                    "match_reason": reasons[0] if reasons else "Matched medicine query in the dataset",
-                }
-            )
-
-        candidates.sort(
-            key=lambda item: (
-                -float(item["score"]),
-                str(item["record"]["name"]).lower(),
-            )
-        )
-        return candidates
+        return self._finalize_candidates(candidates)
 
     def _build_related_medicine_candidates(
         self,
-        primary_record: dict[str, object],
+        primary_record: Mapping[str, object],
         seeded_candidates: list[dict[str, object]],
         limit: int,
     ) -> list[dict[str, object]]:
@@ -598,55 +828,75 @@ class MedicineService:
         for candidate in seeded_candidates[:limit]:
             upsert(candidate)
 
-        primary_idx = next(
-            (i for i, r in enumerate(self._records) if r is primary_record), None
-        )
-        primary_salt_key = self._norms["salt_key"][primary_idx] if primary_idx is not None else normalize_text(str(primary_record.get("salt_key", "")))
-        primary_category = self._norms["category"][primary_idx] if primary_idx is not None else normalize_text(str(primary_record.get("category", "")))
-        primary_name = self._norms["name"][primary_idx] if primary_idx is not None else normalize_text(str(primary_record.get("name", "")))
+        primary_salt_key = normalize_text(str(primary_record.get("salt_key", "")))
+        primary_category = normalize_text(str(primary_record.get("category", "")))
+        primary_name = normalize_text(str(primary_record.get("name", "")))
 
-        _norm_names = self._norms["name"]
-        _norm_salts = self._norms["salt_key"]
-        _norm_cats = self._norms["category"]
+        candidates: list[tuple[float, int, dict[str, object]]] = []
+        candidate_limit = max(limit * 8, 50)
+        seq = count()
 
-        for i, record in enumerate(self._records):
-            score = 0.0
-            match_tags: set[str] = set()
-            reasons: list[str] = []
+        with self._open_connection() as conn:
+            for record in self._fetch_rows(
+                conn,
+                [
+                    "name",
+                    "composition",
+                    "category",
+                    "uses",
+                    "salt_key",
+                    "manufacturer",
+                    "normalized_name",
+                    "normalized_composition",
+                    "normalized_category",
+                    "normalized_uses",
+                    "normalized_salt_key",
+                    "normalized_manufacturer",
+                ],
+            ):
+                score = 0.0
+                match_tags: set[str] = set()
+                reasons: list[str] = []
 
-            if _norm_names[i] == primary_name:
-                score += 200
-                match_tags.add("exact_match")
-                reasons.append("Primary medicine match")
-            if primary_salt_key and _norm_salts[i] == primary_salt_key:
-                score += 95
-                match_tags.add("same_salt")
-                reasons.append("Shares the same salt key")
-            if primary_category and _norm_cats[i] == primary_category:
-                score += 42
-                match_tags.add("same_category")
-                reasons.append("Shares the same category")
+                if record["normalized_name"] == primary_name:
+                    score += 200
+                    match_tags.add("exact_match")
+                    reasons.append("Primary medicine match")
+                if primary_salt_key and record["normalized_salt_key"] == primary_salt_key:
+                    score += 95
+                    match_tags.add("same_salt")
+                    reasons.append("Shares the same salt key")
+                if primary_category and record["normalized_category"] == primary_category:
+                    score += 42
+                    match_tags.add("same_category")
+                    reasons.append("Shares the same category")
 
-            if score <= 0:
-                continue
+                if score <= 0:
+                    continue
 
-            upsert(
-                {
-                    "record": record,
-                    "score": score,
-                    "match_tags": sorted(match_tags),
-                    "match_reason": reasons[0] if reasons else "Related medicine in the dataset",
-                }
-            )
+                self._push_candidate(
+                    candidates,
+                    {
+                        "record": record,
+                        "score": score,
+                        "match_tags": sorted(match_tags),
+                        "match_reason": reasons[0] if reasons else "Related medicine in the dataset",
+                    },
+                    candidate_limit,
+                    seq,
+                )
 
-        candidates = list(merged.values())
-        candidates.sort(
+        for candidate in self._finalize_candidates(candidates):
+            upsert(candidate)
+
+        all_candidates = list(merged.values())
+        all_candidates.sort(
             key=lambda item: (
                 -float(item["score"]),
                 str(item["record"]["name"]).lower(),
             )
         )
-        return candidates[:limit]
+        return all_candidates[:limit]
 
     def _expand_symptom_keywords(self, normalized_query: str) -> set[str]:
         keywords = set(normalized_query.split())
@@ -655,22 +905,17 @@ class MedicineService:
                 keywords.update(normalize_text(hint) for hint in hints)
         return {keyword for keyword in keywords if keyword}
 
-    def _to_response_record(
-        self,
-        record: dict[str, object],
-        score: float | int | None = None,
-        match_tags: list[str] | None = None,
-        match_reason: str | None = None,
-    ) -> MedicineRecord:
-        normalized_score = round(float(score), 2) if score is not None else None
-        return MedicineRecord(
-            name=str(record["name"]),
-            composition=str(record["composition"]),
-            category=str(record["category"]),
-            uses=list(record["uses_list"]),
-            salt_key=str(record["salt_key"]),
-            manufacturer=str(record["manufacturer"]),
-            match_reason=match_reason,
-            match_tags=match_tags or [],
-            score=normalized_score,
-        )
+    def _build_candidate_phrases(self, tokens: list[str], max_window: int = 5) -> list[str]:
+        phrases: list[str] = []
+        seen: set[str] = set()
+        upper = min(max_window, len(tokens))
+
+        for size in range(upper, 0, -1):
+            for start in range(0, len(tokens) - size + 1):
+                phrase = " ".join(tokens[start : start + size]).strip()
+                if not phrase or phrase in seen:
+                    continue
+                seen.add(phrase)
+                phrases.append(phrase)
+
+        return phrases

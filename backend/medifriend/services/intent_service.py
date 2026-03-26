@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Sequence
+from typing import Callable, Sequence
 
 import httpx
 
@@ -21,6 +21,7 @@ class IntentService:
         text: str,
         known_medicines: Sequence[str] | None = None,
         known_salt_keys: Sequence[str] | None = None,
+        medicine_lookup: Callable[[str], str | None] | None = None,
     ) -> IntentResponse:
         if self.api_key:
             try:
@@ -36,6 +37,7 @@ class IntentService:
             text=text,
             known_medicines=known_medicines or [],
             known_salt_keys=known_salt_keys or [],
+            medicine_lookup=medicine_lookup,
         )
 
     async def _extract_with_groq(
@@ -93,13 +95,16 @@ class IntentService:
         text: str,
         known_medicines: Sequence[str],
         known_salt_keys: Sequence[str],
+        medicine_lookup: Callable[[str], str | None] | None = None,
     ) -> IntentResponse:
         normalized_text = normalize_text(text)
         requested_action = self._detect_action(normalized_text)
-        extracted_medicine = self._match_known_entity(
-            normalized_text,
-            list(known_medicines) + list(known_salt_keys),
-        )
+        extracted_medicine = medicine_lookup(text) if medicine_lookup else None
+        if not extracted_medicine:
+            extracted_medicine = self._match_known_entity(
+                normalized_text,
+                list(known_medicines) + list(known_salt_keys),
+            )
         extracted_symptom = None
         entity_type = "unknown"
         entity_value = None
