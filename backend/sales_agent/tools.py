@@ -9,7 +9,6 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_openai import ChatOpenAI
 from langchain_groq import ChatGroq
 
 logger = logging.getLogger(__name__)
@@ -36,6 +35,7 @@ def get_llm(
     if provider_env in {"groq"} or (provider_env == "" and has_groq):
         return ChatGroq(model=model or os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile"), temperature=0.3)
 
+    from langchain_openai import ChatOpenAI  # lazy import — only when OpenAI is selected
     return ChatOpenAI(model=model or os.environ.get("OPENAI_MODEL", "gpt-4o-mini"), temperature=0.3)
 
 

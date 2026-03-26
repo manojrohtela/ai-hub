@@ -15,10 +15,7 @@ plotly
 
 # AI / LLM
 groq
-langchain
-langchain-openai
 langchain-groq
-openai
 
 # Groq SDK (used by MediFriend directly)
 # groq is already listed above
