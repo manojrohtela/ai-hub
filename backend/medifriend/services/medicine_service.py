@@ -68,24 +68,28 @@ class MedicineService:
         if not csv_path.exists():
             raise FileNotFoundError(f"Medicine dataset not found at {csv_path}")
 
-        frame = self._load_frame(csv_path)
-        for column in self.REQUIRED_COLUMNS:
-            frame[column] = frame[column].astype(str).str.strip()
+        cache_path = csv_path.with_suffix(".pkl")
+        if cache_path.exists():
+            import pickle
+            with open(cache_path, "rb") as fh:
+                data = pickle.load(fh)
+            self._records: list[dict[str, object]] = data["records"]
+            self._norms: dict[str, list[str]] = data["norms"]
+        else:
+            frame = self._load_frame(csv_path)
+            for column in self.REQUIRED_COLUMNS:
+                frame[column] = frame[column].astype(str).str.strip()
 
-        frame["uses_list"] = frame["uses"].map(split_uses)
+            frame["uses_list"] = frame["uses"].map(split_uses)
 
-        # Build normalized value lists separately — avoids storing them inside each
-        # dict record, which triples memory for 250K+ records. Lists of strings are
-        # ~4x more memory-efficient than equivalent dict fields.
-        self._norms: dict[str, list[str]] = {
-            col: frame[col].map(normalize_text).tolist()
-            for col in self.REQUIRED_COLUMNS
-        }
+            self._norms = {
+                col: frame[col].map(normalize_text).tolist()
+                for col in self.REQUIRED_COLUMNS
+            }
 
-        # Store only the fields needed for API responses in the dicts.
-        _resp_cols = ["name", "composition", "category", "uses", "salt_key", "manufacturer", "uses_list"]
-        self._records: list[dict[str, object]] = frame[_resp_cols].to_dict("records")
-        del frame
+            _resp_cols = ["name", "composition", "category", "uses", "salt_key", "manufacturer", "uses_list"]
+            self._records = frame[_resp_cols].to_dict("records")
+            del frame
 
         name_pairs = {
             (str(record["name"]), self._norms["name"][i])

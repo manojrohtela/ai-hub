@@ -18,21 +18,29 @@ from .services.medicine_service import MedicineService
 
 router = APIRouter()
 
-# Eager init at module level — safe now that MedicineService stores normalized
-# values as compact lists (~170MB) instead of dict fields (~400MB).
-_settings = get_settings()
-_medicine_service = MedicineService(_settings.dataset_path)
-_intent_service = IntentService(
-    api_key=_settings.groq_api_key,
-    model=_settings.groq_model,
-)
+# Lazy init — MedicineService loads a 65MB pickle cache on first request
+# (~0.3s) instead of parsing the raw CSV (~8s). This keeps startup memory
+# within Render's 512MB limit while making chat responses fast.
+_medicine_service: MedicineService | None = None
+_intent_service: IntentService | None = None
 
 
 def get_medicine_service(request: Request) -> MedicineService:
+    global _medicine_service
+    if _medicine_service is None:
+        settings = get_settings()
+        _medicine_service = MedicineService(settings.dataset_path)
     return _medicine_service
 
 
 def get_intent_service(request: Request) -> IntentService:
+    global _intent_service
+    if _intent_service is None:
+        settings = get_settings()
+        _intent_service = IntentService(
+            api_key=settings.groq_api_key,
+            model=settings.groq_model,
+        )
     return _intent_service
 
 
