@@ -1,0 +1,16 @@
+name,composition,category,uses,salt_key,manufacturer
+Paracetamol 500mg,Paracetamol 500mg,Pain Relief,"Fever, headache, mild pain, body ache",paracetamol,Apollo Pharmacy
+Acetaminophen 500mg,Acetaminophen 500mg,Pain Relief,"Fever, headache, mild pain, body ache",paracetamol,HealthFirst Labs
+Tylenol 500mg,Paracetamol 500mg,Pain Relief,"Fever, headache, mild pain",paracetamol,Johnson & Johnson
+Calpol 500mg,Paracetamol 500mg,Pain Relief,"Fever, headache, mild pain",paracetamol,GSK Pharma
+Dolo 650mg,Paracetamol 650mg,Pain Relief,"Fever, body ache, headache",paracetamol,Micro Labs
+Crocin 650mg,Paracetamol 650mg,Pain Relief,"Fever, body ache, headache",paracetamol,GSK Consumer
+Ibuprofen 400mg,Ibuprofen 400mg,Anti Inflammatory,"Pain, inflammation, headache, body ache",ibuprofen,Adventis
+Advil 400mg,Ibuprofen 400mg,Anti Inflammatory,"Pain, inflammation, headache",ibuprofen,Pfizer
+Cetirizine 10mg,Cetirizine 10mg,Allergy Relief,"Allergy, sneezing, itching, cold symptoms",cetirizine,Sun Pharma
+Zyrtec 10mg,Cetirizine 10mg,Allergy Relief,"Allergy, sneezing, itching",cetirizine,UCB
+Pantoprazole 40mg,Pantoprazole 40mg,Acidity Relief,"Acidity, heartburn, acid reflux, stomach discomfort",pantoprazole,Cipla
+Pan 40mg,Pantoprazole 40mg,Acidity Relief,"Acidity, heartburn, acid reflux",pantoprazole,Alkem
+Azithromycin 500mg,Azithromycin 500mg,Antibiotic,"Bacterial infection, throat infection, respiratory infection",azithromycin,Sun Pharma
+Azee 500mg,Azithromycin 500mg,Antibiotic,"Bacterial infection, throat infection",azithromycin,Cipla
+Ambroxol Syrup,Ambroxol Hydrochloride,Cough Relief,"Cough, chest congestion, mucus relief",ambroxol,Dr Reddy's

@@ -1,0 +1,19 @@
+{
+  "name": "ai-hub",
+  "private": true,
+  "version": "0.0.1",
+  "scripts": {
+    "dev:hub": "pnpm --filter @hub/hub dev",
+    "dev:plotify": "pnpm --filter @hub/plotify dev",
+    "dev:medifriend": "pnpm --filter @hub/medifriend dev",
+    "dev:sales-agent": "pnpm --filter @hub/sales-agent dev",
+    "build:hub": "pnpm --filter @hub/hub build",
+    "build:all": "pnpm --filter './apps/*' build"
+  },
+  "pnpm": {
+    "overrides": {
+      "vite": "6.3.5"
+    },
+    "onlyBuiltDependencies": ["@tailwindcss/oxide", "esbuild"]
+  }
+}

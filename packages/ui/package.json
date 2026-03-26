@@ -1,0 +1,10 @@
+{
+  "name": "@hub/ui",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "exports": {
+    "./styles/theme.css": "./src/styles/theme.css",
+    "./utils": "./src/utils/cn.ts"
+  }
+}
