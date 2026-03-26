@@ -73,18 +73,28 @@ class MedicineService:
             frame[column] = frame[column].astype(str).str.strip()
 
         frame["uses_list"] = frame["uses"].map(split_uses)
-        for column in self.REQUIRED_COLUMNS:
-            frame[f"normalized_{column}"] = frame[column].map(normalize_text)
 
-        self._records: list[dict[str, object]] = frame.to_dict("records")
+        # Build normalized value lists separately — avoids storing them inside each
+        # dict record, which triples memory for 250K+ records. Lists of strings are
+        # ~4x more memory-efficient than equivalent dict fields.
+        self._norms: dict[str, list[str]] = {
+            col: frame[col].map(normalize_text).tolist()
+            for col in self.REQUIRED_COLUMNS
+        }
+
+        # Store only the fields needed for API responses in the dicts.
+        _resp_cols = ["name", "composition", "category", "uses", "salt_key", "manufacturer", "uses_list"]
+        self._records: list[dict[str, object]] = frame[_resp_cols].to_dict("records")
+        del frame
+
         name_pairs = {
-            (str(record["name"]), str(record["normalized_name"]))
-            for record in self._records
+            (str(record["name"]), self._norms["name"][i])
+            for i, record in enumerate(self._records)
             if record["name"]
         }
         salt_pairs = {
-            (str(record["salt_key"]), str(record["normalized_salt_key"]))
-            for record in self._records
+            (str(record["salt_key"]), self._norms["salt_key"][i])
+            for i, record in enumerate(self._records)
             if record["salt_key"]
         }
         self.known_medicine_names = [
@@ -360,10 +370,14 @@ class MedicineService:
         symptom_keywords = self._expand_symptom_keywords(normalized_query)
         candidates: list[dict[str, object]] = []
 
-        for record in self._records:
-            normalized_uses = str(record["normalized_uses"])
-            normalized_category = str(record["normalized_category"])
-            normalized_name = str(record["normalized_name"])
+        _norm_uses = self._norms["uses"]
+        _norm_cats = self._norms["category"]
+        _norm_names = self._norms["name"]
+
+        for i, record in enumerate(self._records):
+            normalized_uses = _norm_uses[i]
+            normalized_category = _norm_cats[i]
+            normalized_name = _norm_names[i]
 
             score = 0.0
             match_tags: set[str] = set()
@@ -460,11 +474,13 @@ class MedicineService:
         normalized_salt_key = normalize_text(salt_key)
         normalized_exclude_name = normalize_text(exclude_name or "")
 
+        _norm_salts = self._norms["salt_key"]
+        _norm_names = self._norms["name"]
         matches = []
-        for record in self._records:
-            if str(record["normalized_salt_key"]) != normalized_salt_key:
+        for i, record in enumerate(self._records):
+            if _norm_salts[i] != normalized_salt_key:
                 continue
-            if normalized_exclude_name and str(record["normalized_name"]) == normalized_exclude_name:
+            if normalized_exclude_name and _norm_names[i] == normalized_exclude_name:
                 continue
             matches.append(record)
 
@@ -488,11 +504,16 @@ class MedicineService:
         query_tokens = set(normalized_query.split())
         candidates: list[dict[str, object]] = []
 
-        for record in self._records:
-            normalized_name = str(record["normalized_name"])
-            normalized_salt_key = str(record["normalized_salt_key"])
-            normalized_composition = str(record["normalized_composition"])
-            normalized_manufacturer = str(record["normalized_manufacturer"])
+        _norm_names = self._norms["name"]
+        _norm_salts = self._norms["salt_key"]
+        _norm_comps = self._norms["composition"]
+        _norm_manuf = self._norms["manufacturer"]
+
+        for i, record in enumerate(self._records):
+            normalized_name = _norm_names[i]
+            normalized_salt_key = _norm_salts[i]
+            normalized_composition = _norm_comps[i]
+            normalized_manufacturer = _norm_manuf[i]
 
             score = 0.0
             match_tags: set[str] = set()
@@ -573,24 +594,31 @@ class MedicineService:
         for candidate in seeded_candidates[:limit]:
             upsert(candidate)
 
-        primary_salt_key = str(primary_record["normalized_salt_key"])
-        primary_category = str(primary_record["normalized_category"])
-        primary_name = str(primary_record["normalized_name"])
+        primary_idx = next(
+            (i for i, r in enumerate(self._records) if r is primary_record), None
+        )
+        primary_salt_key = self._norms["salt_key"][primary_idx] if primary_idx is not None else normalize_text(str(primary_record.get("salt_key", "")))
+        primary_category = self._norms["category"][primary_idx] if primary_idx is not None else normalize_text(str(primary_record.get("category", "")))
+        primary_name = self._norms["name"][primary_idx] if primary_idx is not None else normalize_text(str(primary_record.get("name", "")))
 
-        for record in self._records:
+        _norm_names = self._norms["name"]
+        _norm_salts = self._norms["salt_key"]
+        _norm_cats = self._norms["category"]
+
+        for i, record in enumerate(self._records):
             score = 0.0
             match_tags: set[str] = set()
             reasons: list[str] = []
 
-            if str(record["normalized_name"]) == primary_name:
+            if _norm_names[i] == primary_name:
                 score += 200
                 match_tags.add("exact_match")
                 reasons.append("Primary medicine match")
-            if primary_salt_key and str(record["normalized_salt_key"]) == primary_salt_key:
+            if primary_salt_key and _norm_salts[i] == primary_salt_key:
                 score += 95
                 match_tags.add("same_salt")
                 reasons.append("Shares the same salt key")
-            if primary_category and str(record["normalized_category"]) == primary_category:
+            if primary_category and _norm_cats[i] == primary_category:
                 score += 42
                 match_tags.add("same_category")
                 reasons.append("Shares the same category")
