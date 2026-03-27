@@ -27,6 +27,4 @@ pydantic-settings
 # ResumeIQ
 pypdf2
 
-gspread
-google-auth
-google-auth-oauthlib
+openpyxl
