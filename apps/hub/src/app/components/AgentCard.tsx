@@ -1,5 +1,5 @@
 import { motion } from "motion/react";
-import { LucideIcon, Github, ExternalLink } from "lucide-react";
+import { LucideIcon, ExternalLink } from "lucide-react";
 
 export interface Agent {
   id: number;
@@ -17,7 +17,7 @@ interface AgentCardProps {
 }
 
 export function AgentCard({ agent }: AgentCardProps) {
-  const { icon: Icon, name, description, tags, githubUrl, liveUrl } = agent;
+  const { icon: Icon, name, description, tags, liveUrl } = agent;
 
   return (
     <motion.div
@@ -36,15 +36,10 @@ export function AgentCard({ agent }: AgentCardProps) {
             <Icon className="w-7 h-7 text-white" />
           </div>
 
-          {liveUrl ? (
+          {liveUrl && (
             <span className="flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-medium px-2.5 py-1 rounded-full">
               <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse" />
               Live
-            </span>
-          ) : (
-            <span className="flex items-center gap-1.5 bg-slate-700/50 border border-slate-600/50 text-slate-400 text-xs font-medium px-2.5 py-1 rounded-full">
-              <Github className="w-3 h-3" />
-              Open Source
             </span>
           )}
         </div>
@@ -67,7 +62,7 @@ export function AgentCard({ agent }: AgentCardProps) {
 
         {/* Action buttons */}
         <div className="flex gap-2 mt-auto">
-          {liveUrl && (
+          {liveUrl ? (
             <a
               href={liveUrl}
               target="_blank"
@@ -77,18 +72,11 @@ export function AgentCard({ agent }: AgentCardProps) {
               <ExternalLink className="w-4 h-4" />
               Open Agent
             </a>
+          ) : (
+            <div className="flex-1 flex items-center justify-center gap-2 bg-slate-700/40 text-slate-500 py-2.5 px-4 rounded-lg text-sm font-medium cursor-default">
+              Coming Soon
+            </div>
           )}
-          <a
-            href={githubUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={`flex items-center justify-center gap-2 border border-slate-600/50 hover:border-slate-400 text-slate-300 hover:text-white py-2.5 px-4 rounded-lg transition-all duration-200 text-sm font-medium ${
-              liveUrl ? "" : "flex-1"
-            }`}
-          >
-            <Github className="w-4 h-4" />
-            {!liveUrl && "View on GitHub"}
-          </a>
         </div>
       </div>
     </motion.div>

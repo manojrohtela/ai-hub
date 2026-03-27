@@ -310,14 +310,6 @@ export default function App() {
               </div>
 
               <div className="flex flex-wrap justify-center gap-6">
-                <a
-                  href="https://github.com/manojrohtela"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-slate-400 hover:text-white transition-colors duration-200"
-                >
-                  GitHub
-                </a>
                 <a href="#agents" className="text-slate-400 hover:text-white transition-colors duration-200">
                   Agents
                 </a>
