@@ -1,6 +1,6 @@
 import { motion } from "motion/react";
 import { AgentCard, type Agent } from "./components/AgentCard";
-import { TrendingUp, HeartPulse, Home, Sparkles, Target, Zap, Database, Briefcase, Mic, Scale, Leaf, Wand2 } from "lucide-react";
+import { TrendingUp, HeartPulse, Home, Sparkles, Target, Zap, Database, Briefcase, Mic, Scale, Leaf, Wand2, Trophy } from "lucide-react";
 
 const agents: Agent[] = [
   {
@@ -92,6 +92,16 @@ const agents: Agent[] = [
     tags: ["React", "FastAPI", "Groq", "Tailwind", "Framer Motion"],
     githubUrl: "https://github.com/manojrohtela/BrandForge",
     liveUrl: import.meta.env.VITE_BRANDFORGE_URL,
+  },
+  {
+    id: 10,
+    icon: Trophy,
+    name: "ScoreKeeper",
+    description:
+      "Upload match scoresheet images and auto-extract player points via AI vision. Tracks a per-match leaderboard in Google Sheets and lets players ask about their scores in Hindi or English.",
+    tags: ["React", "FastAPI", "Groq Vision", "Google Sheets", "Tailwind"],
+    githubUrl: "https://github.com/manojrohtela/ScoreKeeper",
+    liveUrl: import.meta.env.VITE_SCOREKEEPER_URL,
   },
 ];
 

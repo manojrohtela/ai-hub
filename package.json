@@ -13,6 +13,7 @@
     "dev:contractlens": "pnpm --filter @hub/contractlens dev",
     "dev:nutriplan": "pnpm --filter @hub/nutriplan dev",
     "dev:brandforge": "pnpm --filter @hub/brandforge dev",
+    "dev:scorekeeper": "pnpm --filter @hub/scorekeeper dev",
     "build:hub": "pnpm --filter @hub/hub build",
     "build:all": "pnpm --filter './apps/*' build"
   },
