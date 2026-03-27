@@ -1,10 +1,9 @@
 import type { QueryResponse, UploadResponse } from './types';
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000').replace(/\/$/, '');
-const PREFIX = `${API_BASE}/api/datawhisperer`;
+const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api/datawhisperer').replace(/\/$/, '');
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${PREFIX}${path}`, init);
+  const res = await fetch(`${API_BASE}${path}`, init);
   if (!res.ok) {
     let msg = `Request failed with status ${res.status}`;
     try {

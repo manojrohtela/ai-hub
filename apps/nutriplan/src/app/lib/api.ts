@@ -1,9 +1,8 @@
 import type { ChatResponse, PlanResponse } from './types';
-const BASE = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000').replace(/\/$/, '');
-const P = `${BASE}/api/nutriplan`;
+const BASE = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api/nutriplan').replace(/\/$/, '');
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(`${P}${path}`, {
+  const r = await fetch(`${BASE}${path}`, {
     headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) }, ...init,
   });
   if (!r.ok) {

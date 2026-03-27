@@ -1,9 +1,8 @@
 import type { BrandResponse, RefineResponse } from './types';
-const BASE = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000').replace(/\/$/, '');
-const P = `${BASE}/api/brandforge`;
+const BASE = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api/brandforge').replace(/\/$/, '');
 
 async function req<T>(path: string, body: unknown): Promise<T> {
-  const r = await fetch(`${P}${path}`, {
+  const r = await fetch(`${BASE}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),

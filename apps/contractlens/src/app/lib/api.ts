@@ -1,9 +1,8 @@
 import type { AnalyzeResponse, ChatResponse } from './types';
-const BASE = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000').replace(/\/$/, '');
-const P = `${BASE}/api/contractlens`;
+const BASE = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api/contractlens').replace(/\/$/, '');
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(`${P}${path}`, { headers: { ...(init?.headers ?? {}) }, ...init });
+  const r = await fetch(`${BASE}${path}`, { headers: { ...(init?.headers ?? {}) }, ...init });
   if (!r.ok) {
     let msg = `Error ${r.status}`;
     try { const d = await r.json(); if (d?.detail) msg = d.detail; } catch {}

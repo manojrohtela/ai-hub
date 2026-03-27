@@ -1,10 +1,9 @@
 import type { AnswerResponse, StartResponse, SummaryResponse } from './types';
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000').replace(/\/$/, '');
-const P = `${API_BASE}/api/interviewcoach`;
+const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api/interviewcoach').replace(/\/$/, '');
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(`${P}${path}`, {
+  const r = await fetch(`${API_BASE}${path}`, {
     headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
     ...init,
   });
