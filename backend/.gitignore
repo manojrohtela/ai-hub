@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# Large data files — keep locally, not in git
+medifriend/data/*.sqlite3
+medifriend/data/*.pkl
+medifriend/data/medicines_slim.csv
