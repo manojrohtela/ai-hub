@@ -22,3 +22,7 @@ langchain-groq
 
 # Pydantic
 pydantic
+pydantic-settings
+
+# ResumeIQ
+pypdf2

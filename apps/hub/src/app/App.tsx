@@ -1,6 +1,6 @@
 import { motion } from "motion/react";
 import { AgentCard, type Agent } from "./components/AgentCard";
-import { TrendingUp, HeartPulse, Home, Sparkles, Target, Zap } from "lucide-react";
+import { TrendingUp, HeartPulse, Home, Sparkles, Target, Zap, Database, Briefcase, Mic, Scale, Leaf, Wand2 } from "lucide-react";
 
 const agents: Agent[] = [
   {
@@ -32,6 +32,66 @@ const agents: Agent[] = [
     tags: ["React", "FastAPI", "Groq", "SVG Canvas"],
     githubUrl: "https://github.com/manojrohtela/plotify",
     liveUrl: import.meta.env.VITE_PLOTIFY_URL,
+  },
+  {
+    id: 4,
+    icon: Database,
+    name: "DataWhisperer",
+    description:
+      "Upload any CSV and ask questions in plain English. DataWhisperer generates SQL queries using Groq LLM and returns instant results with interactive tables — no SQL knowledge required.",
+    tags: ["React", "FastAPI", "Groq", "SQLite", "Pandas"],
+    githubUrl: "https://github.com/manojrohtela/DataWhisperer",
+    liveUrl: import.meta.env.VITE_DATAWHISPERER_URL,
+  },
+  {
+    id: 5,
+    icon: Briefcase,
+    name: "ResumeIQ",
+    description:
+      "Upload your resume and get an instant AI-powered score, section-by-section feedback, keyword analysis against job descriptions, and an interactive career coaching chatbot.",
+    tags: ["React", "FastAPI", "Groq", "PyPDF2", "Tailwind"],
+    githubUrl: "https://github.com/manojrohtela/ResumeIQ",
+    liveUrl: import.meta.env.VITE_RESUMEIQ_URL,
+  },
+  {
+    id: 6,
+    icon: Mic,
+    name: "InterviewCoach",
+    description:
+      "Practice job interviews with 5 AI-generated questions tailored to your role and experience level. Get scored feedback on clarity, depth, and examples — plus a model answer after each response.",
+    tags: ["React", "FastAPI", "Groq", "Tailwind", "Framer Motion"],
+    githubUrl: "https://github.com/manojrohtela/InterviewCoach",
+    liveUrl: import.meta.env.VITE_INTERVIEWCOACH_URL,
+  },
+  {
+    id: 7,
+    icon: Scale,
+    name: "ContractLens",
+    description:
+      "Upload any contract and instantly surface risks, obligations, key dates, and missing clauses — explained in plain English. Includes a legal Q&A chat for follow-up questions.",
+    tags: ["React", "FastAPI", "Groq", "PyPDF2", "Tailwind"],
+    githubUrl: "https://github.com/manojrohtela/ContractLens",
+    liveUrl: import.meta.env.VITE_CONTRACTLENS_URL,
+  },
+  {
+    id: 8,
+    icon: Leaf,
+    name: "NutriPlan",
+    description:
+      "Generate a personalised meal plan with macros, ingredients, and a shopping list — tailored to your goal, diet type, and allergies. Includes a chat-based nutritionist for follow-up questions.",
+    tags: ["React", "FastAPI", "Groq", "Tailwind", "Framer Motion"],
+    githubUrl: "https://github.com/manojrohtela/NutriPlan",
+    liveUrl: import.meta.env.VITE_NUTRIPLAN_URL,
+  },
+  {
+    id: 9,
+    icon: Wand2,
+    name: "BrandForge",
+    description:
+      "Describe your startup and get a complete brand identity: name options, taglines, color palette, mission statement, value propositions, social bio, and elevator pitch. Refine with natural language feedback.",
+    tags: ["React", "FastAPI", "Groq", "Tailwind", "Framer Motion"],
+    githubUrl: "https://github.com/manojrohtela/BrandForge",
+    liveUrl: import.meta.env.VITE_BRANDFORGE_URL,
   },
 ];
 

@@ -7,6 +7,12 @@
     "dev:plotify": "pnpm --filter @hub/plotify dev",
     "dev:medifriend": "pnpm --filter @hub/medifriend dev",
     "dev:sales-agent": "pnpm --filter @hub/sales-agent dev",
+    "dev:datawhisperer": "pnpm --filter @hub/datawhisperer dev",
+    "dev:resumeiq": "pnpm --filter @hub/resumeiq dev",
+    "dev:interviewcoach": "pnpm --filter @hub/interviewcoach dev",
+    "dev:contractlens": "pnpm --filter @hub/contractlens dev",
+    "dev:nutriplan": "pnpm --filter @hub/nutriplan dev",
+    "dev:brandforge": "pnpm --filter @hub/brandforge dev",
     "build:hub": "pnpm --filter @hub/hub build",
     "build:all": "pnpm --filter './apps/*' build"
   },
